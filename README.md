@@ -18,3 +18,15 @@ faops n50 -S -C RefSeq/*.genomic.fan.gz
 
 gzip -dcf RefSeq/*.genomic.fna.gz > RefSeq/plasmid.fa
 ```
+
+## MinHash获取非冗余质粒non-redundant plasmids
+```bash
+mkdir ~/project/plasmid/nonredundant
+cd ~/project/plasmid/nonredundant
+
+faops size ../RefSeq/plasmid.fa > ../refseq.sizes
+
+# 统计序列长度小于2000的序列数量
+tsv-filter ../refseq.sizes --le 2:2000 | wc -l
+
+```
