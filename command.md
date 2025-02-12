@@ -11,17 +11,20 @@ readme.md中常用的命令
     `-c`stdout解压后内容输出到标准输出。结合`>`指定输出保存文件   
     `-f`force强制，输出文件已存在则覆盖而不提示    
 
+- `tsv-filter`处理tsv（tab-separated values），属于tsv-utils一部分。对tsv文件中数据基于字段值进行过滤
+选项：`--le`less than or equal to小于等于。    
+    `--gt`（greater than）大于   
+    `2:2000`，2表示列，2000为阈值（字段值满足的小于等于的条件）   
+    `--ff-str-ne 1:2`ff字段filed/str字符串比较/ne不相等not equal，字段间字符串不相等过滤，第一列、第二列值不同时该行保留   
+    `-d`设置字段分隔符，默认制表符\t。`-d" "`设置分隔符为空格     
+    `--regex`匹配正则表达式regular expression。   
+
+- <(...)进程替换，括号内命令的结果作为**临时文件**传递给前一命令
+
 - MinHash含义
 用哈希函数将元素映射成数字，从哈希值里找最小值，并只保留最小值，即MinHash签名，重复多次得到多个签名，再比较计算签名的相似度。   
 质粒中：将质粒序列拆分为多个k-mer形成一个k-mer集合，再用多个哈希函数处理每个质粒的k-mer集合，生成MinHash签名，比较计算质粒间的相似度   
 过滤后保留不相似的质粒（非冗余质粒）
-
-- `tsv-filter`处理tsv（tab-separated values），属于tsv-utils一部分。对tsv文件中数据基于字段值进行过滤
-选项：`--le`less than or equal to小于等于。`--gt`（greater than）大于   
-    `2:2000`，2表示列，2000为阈值（字段值满足的小于等于的条件）   
-    `--ff-str-ne 1:2`ff字段filed/str字符串比较/ne不相等not equal，字段间字符串不相等过滤，第一列、第二列值不同时该行保留   
-
-- <(...)进程替换，括号内命令的结果作为**临时文件**传递给前一命令
 
 - `mash sketch`计算MinHash sktech，用于快速计算序列相似性。`Mash`工具之一
 用法：`mash sketch [options] <input> -o <output.msh>`    
@@ -44,9 +47,34 @@ readme.md中常用的命令
 - `sort`排序，按照字母或数字顺序
 
 - `perl`运行perl
-选项：`-n`循环处理输出的每一行，每一行被perl代码处理一次    
+选项：`-n`循环处理输出的每一行，每一行被perl代码处理一次。不会自动输出结果（与`-p`区别）    
     `-l`line-ending processing自动去掉每行的换行符并在输出是重新添加换行符    
     `-a`自动分割字段，并放入数组`@F`中，每个字段一个@F    
     `-F`设置分隔符，默认空格或制表符，`-F"\t"`指定分隔符为制表符    
     `-M`加载perl模块，`-MGraph::Undirected`加载模块Graph::Undirected，创建无向图     
-    `-e`执行后续perl代码
+    `-e`执行后续perl代码    
+    `-p`print loop循环打印，自动读取输入对每一行都执行后续perl代码并自动输出结果
+
+- `sed`流编辑器
+选项：`-e`允许在一个sed中执行多个编辑操作，如`sed -e 'command1' -e 'command2' filename`    
+用法：`sed '1d'`删除第一行
+
+- `xargs`将标准输入的数据作为参数传递给命令
+选项：`-I`insert mode指定占位符，让xargs**逐行**替换输入数据，（xargs默认是所有输入数据合并处理）。
+
+- `parallel`并行处理
+选项：`--colsep`每列按顺序依次传递给后续命令
+
+- `rg`即`repgrep`快速文本搜索
+选项：`-F`固定字符串搜索（--fixed-strings），直接按字符匹配，而不作为正则表达式处理    
+    `-l`只列出匹配到的文件名（--files-with-matches），而不显示文件内具体匹配的行的内容    
+    `"{1}"`第一字段
+
+- `tr`（translate）替换、删除、压缩字符
+选项：
+
+- `uniq`去掉相临的重复行，需要sort先排序，uniq只能去掉连续相同的行
+
+- `sort`排序
+选项：`-n`numeric按数字大小排序
+    `-r`reverse降序（从大到小）

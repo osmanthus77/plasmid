@@ -20,6 +20,7 @@ gzip -dcf RefSeq/*.genomic.fna.gz > RefSeq/plasmid.fa
 ```
 
 ## 2 MinHash获取非冗余质粒non-redundant plasmids
+MinHash原理：[通俗易懂理解Minhash算法](https://blog.csdn.net/a61022706/article/details/141640451)
 ```bash
 mkdir ~/project/plasmid/nonredundant
 cd ~/project/plasmid/nonredundant
@@ -59,13 +60,12 @@ find job -maxdepth 1 -type f -name "[0-9]??" | sort |
     parallel -j 16 '
         cat {}.tsv | 
             tsv-filter --ff-str-ne 1:2 --le 3:0.01
-    ' \ 
-    > redundant.tsv
+    ' > redundant.tsv
 
 head -n 5 redundant.tsv
 cat redundant.tsv | wc -l
 
-# 划分连通组件，同一连通组件内相似度高
+# 构建无冗余网络（划分连通组件，同一连通组件内相似度高）
 cat redundant.tsv | 
     perl -nla -F"\t" -MGraph::Undirected -e '
         BEGIN {
@@ -79,9 +79,9 @@ cat redundant.tsv |
                 print join qq{\t}, sort @{$cc};
             }
         }
-    ' \
-    > connected_components.tsv
+    ' > connected_components.tsv
 
+# 列转行
 cat connected_components.tsv | perl -nla -F"\t" -e 'printf qq{%s\n}, $_ for @F' > components.list
 
 wc -l connected_components.tsv components.list
@@ -106,7 +106,7 @@ faops size ../nonredundant/refseq.nr.fa | cut -f 1 | gsplit -l 1000 -a 3 -d - jo
 # 得到nr的sketch
 find job -maxdepth 1 -type f -name "[0-9]??" | sort | 
     parallel -j 4 --line-buffer '
-        echo >&2 "==> {}
+        echo >&2 "==> {}"
         faops some ../nonredundant/refseq.nr.fa {} stdout | 
             mash sketch -k 21 -s 1000 -i -p 6 - -o {}.msh
     '
@@ -122,8 +122,7 @@ find job -maxdepth 1 -type f -name "[0-9]??" | sort |
 find job -maxdepth 1 -type f -name "[0-9]??" | sort | 
     parallel -j 1 '
         cat {}.tsv
-    ' \ 
-    > dist_full.tsv
+    ' > dist_full.tsv
 
 # distance < 0.05
 cat dist_full.tsv | tsv-filter --ff-str-ne 1:2 --le 3:0.05 > connected.tsv
@@ -131,10 +130,10 @@ cat dist_full.tsv | tsv-filter --ff-str-ne 1:2 --le 3:0.05 > connected.tsv
 head -n 5 connected.tsv
 cat connected.tsv | wc -l
 
-# 划分连通组件并按照大小分类保存
+# 划分连通组件并按照大小分组保存序列ID
 mkdir -p group
 cat connected.tsv | 
-    perl -nla -F"\t" -MGraph:Undirected -MPath::Tine -e '
+    perl -nla -F"\t" -MGraph::Undirected -MPath::Tiny -e '
         BEGIN {
             our $g = Graph::Undirected->new;
         }
@@ -147,7 +146,7 @@ cat connected.tsv |
             my @ccs = $g->connected_components;
             @ccs = map { $_->[0] }
                 sort { $b->[1] <=> $a->[1] }
-                map { [ $_, scalar (@{$_} ) ] } @ccs
+                map { [ $_, scalar( @{$_} ) ] } @ccs;
             for my $cc ( @ccs ) {
                 my $count = scalar @{$cc};
                 if ($count < 50 ) {
@@ -164,10 +163,101 @@ cat connected.tsv |
         }
     '
 
+# 未成组的
+faops some -i ../nonredundant/refseq.nr.fa grouped.lst stdout | 
+    faops size stdin | 
+    cut -f 1 > group/lonely.lst
 
+wc -l group/*
 
+# 每个组件内比较相似性
+find group -maxdepth 1 -type f -name "[0-9]*.lst" | sort |
+    parallel -j 4 --line-buffer '
+        echo >&2 "==> {}"
+        
+        faops some ../nonredundant/refseq.nr.fa {} stdout | 
+            mash sketch -k 21 -s 1000 -i -p 6 - -o {}.msh
+            
+        mash dist -p 6 {}.msh {}.msh > {}.tsv
+    '
 
+# 每个连通组件内部层次聚类
+find group -maxdepth 1 -type f -name "[0-9]*.lst.tsv" | sort |
+    parallel -j 4 --line-buffer '
+        echo >&2 "==> {}"
 
+        cat {} |
+            tsv-select -f 1-3 |
+            Rscript -e '\''
+                library(readr);
+                library(tidyr);
+                library(ape);
+                pair_dist <- read_tsv(file("stdin"), col_names=F);
+                tmp <- pair_dist %>%
+                    pivot_wider( names_from = X2, values_from = X3, values_fill = list(X3 = 1.0) )
+                tmp <- as.matrix(tmp)
+                mat <- tmp[,-1]
+                rownames(mat) <- tmp[,1]
 
+                dist_mat <- as.dist(mat)
+                clusters <- hclust(dist_mat, method = "ward.D2")
+                tree <- as.phylo(clusters)
+                write.tree(phy=tree, file="{.}.tree.nwk")
 
+                group <- cutree(clusters, h=0.2) # k=3
+                groups <- as.data.frame(group)
+                groups$ids <- rownames(groups)
+                rownames(groups) <- NULL
+                groups <- groups[order(groups$group), ]
+                write_tsv(groups, "{.}.groups.tsv")
+            '\''
+    '
+
+# subgroup
+mkdir -p subgroup
+cp group/lonely.lst subgroup/
+
+find group -name "*.groups.tsv" | sort | 
+    parallel -j 1 -k '
+        cat {} | sed -e "1d" | xargs -I[] echo "{/.}_[]"
+    ' |
+    sed -e 's/\.lst\.groups_/_/' |
+    perl -na -MPath::Tiny -e '
+        path(qq{subgroup/$F[0].lst})->append(qq{$F[1]\n});
+    '
+
+# ignore small subgroups
+find subgroup -name "*.lst" | sort |
+    parallel -j 1 -k '
+        lines=$(cat {} | wc -l)
+        
+        if (( lines < 5 )); then
+            echo -e "{}\t$lines"
+            cat {} >> subgroup/lonely.lst
+            rm {}
+        fi
+    '
+
+# 将前一步骤中非冗余的connected_components中内容添加到subgroup中
+cat ../nonredundant/connected_components.tsv | 
+    parallel -j 1 --colsep "\t" '
+        file=$(rg -F -l  "{1}" subgroup)
+        echo {} | tr "[:blank:]" "\n" >> ${file}
+    '
+
+# 删除重复
+find subgroup -name "*.lst" | sort |
+    parallel -j 1 '
+        cat {} | sort | uniq > tmp.lst
+        mv tmp.lst {}
+    '
+
+wc -l subgroup/* | sort -nr | head -n 100
+
+wc -l subgroup/* | perl -pe 's/^\s+//' | tsv-filter -d " " --le 1:10 | wc -l
+
+wc -l subgroup/* | perl -pe 's/^\s+//' | tsv-filter -d " " --ge 1:50 | tsv-filter -d " " --regex '2:\d+' | sort -nr > next.tsv
+wc -l next.tsv
+
+rm -rf job
 ```
