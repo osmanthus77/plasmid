@@ -219,13 +219,13 @@ cp group/lonely.lst subgroup/
 
 find group -name "*.groups.tsv" | sort | 
     parallel -j 1 -k '
-        cat {} | sed -e "1d" | xargs -I[] echo "{/.}_[]"
+        cat {} | sed -e "1d" | xargs -I\[\] echo "{/.}_[]"
     ' |
     sed -e 's/\.lst\.groups_/_/' |
     perl -na -MPath::Tiny -e '
         path(qq{subgroup/$F[0].lst})->append(qq{$F[1]\n});
     '
-
+ 
 # ignore small subgroups
 find subgroup -name "*.lst" | sort |
     parallel -j 1 -k '
@@ -256,8 +256,118 @@ wc -l subgroup/* | sort -nr | head -n 100
 
 wc -l subgroup/* | perl -pe 's/^\s+//' | tsv-filter -d " " --le 1:10 | wc -l
 
+# 筛选subgroup中多余50条序列的组
 wc -l subgroup/* | perl -pe 's/^\s+//' | tsv-filter -d " " --ge 1:50 | tsv-filter -d " " --regex '2:\d+' | sort -nr > next.tsv
 wc -l next.tsv
 
 rm -rf job
 ```
+
+## 4 Plasmid：prepare预处理
+### 拆分序列
+```bash
+mkdir ~/project/plasmid/GENOMES
+mkdir ~/project/plasmid/taxon
+cd ~/project/plasmid/grouping
+
+echo -e "#Serial\tGroup\tCount\tTarget" > ../taxon/group_target.tsv
+
+# 统计分组信息（编号、subgroup组名、序列数量、代表序列ID）
+# 并按照subgroup分组顺序从refseq提取序列并简化序列ID
+cat next.tsv | cut -d " " -f 2 | 
+    parallel -j 4 -k --line-buffer '
+        echo >&2 "==> {}"
+        
+        GROUP_NAME={/.}
+        TARGET_NAME=$(head -n 1 {} | perl -pe "s/\.\d+//g")
+        
+        SERIAL={#}
+        COUNT=$(cat {} | wc -l)
+        
+        echo -e "${SERIAL}\t${GROUP_NAME}\t${COUNT}\t${TARGET_NAME}" >> ../taxon/group_target.tsv
+        
+        faops order ../nonredundant/refseq.fa {} stdout | 
+            faops filter -s stdin stdout \
+            > ../GENOMES/${GROUP_NAME}.fa
+    '
+
+# 统计subgroup中序列大小
+cat next.tsv | cut -d" " -f 2 |
+    parallel -j 4 -k --line-buffer '
+        echo >&2 "==> {}"
+        GROUP_NAME={/.}
+        faops size ../GENOMES/${GROUP_NAME}.fa > ../taxon/${GROUP_NAME}.sizes
+    '
+
+# optional：RepeatMasker
+#egaz repeatmasker -p 16 ../GENOMES/*.fa -o ../GENOMES/
+
+# 按照序列ID拆分序列split-name
+find ../GENOMES -maxdepth 1 -type f -name "*.fa" | sort |
+    parallel -j 4 '
+        faops split-name {} {.}
+    '
+
+# 拆分后序列，一条序列单独一个文件夹
+find ../GENOMES -maxdepth 2 -mindepth 2 -type f -name "*.fa" | sort |
+    parallel -j 4 '
+        mkdir -p {.}
+        mv {} {.}
+    '
+```
+
+### prepseq预处理（preparing steps for lastz）
+```bash
+cd ~/project/plasmid
+
+cat taxon/group_target.tsv | sed -e '1d' |
+    parallel --colsep '\t' -no-run-if-empty --line-buffer -k -j 4 '
+        echo -e "==> Group: [{2}]\tTarget: [{4}]\n"
+        
+        for name in $(cat taxon/{2}.sizes | cut -f 1); do
+            egaz prepseq GENOMES/{2}/${name}
+        done
+    '
+```
+
+### 检查序列长度异常值
+```bash
+cd ~/project/plasmid
+
+# 统计next.tsv序列数量、长度之和
+cat taxon/*.sizes | cut -f 1 | wc -l
+# cat taxon/*.sizes | cut -f 2 | paste -sd+ | bc
+awk '{sum+=$2} END {print sum}' taxon/*.sizes
+
+cat taxon/group_target.tsv | sed -e '1d' |
+    parallel --colsep '\t' --no-run-if-empty --line-buffer -k -j 4 '
+        echo -e "==> Group: [{2}]\t Target: [{4}]"
+        
+        median=$(cat taxon/{2}.sizes | datamash median 2)
+        mad=$(cat taxon/{2}.sizes | datamsh mad 2)
+        lower_limit=$( bc <<< " (${median} - 2 * ${mad}) / 2" )
+
+#        echo $median $mad $lower_limit
+        lines=$(tsv-filter taxon/{2}.sizes --le "2:${lower_limit}" |wc -l)
+        
+        if (( lines >0 )); then
+            echo >&2 "     $lines lines to be filtered"
+            tsv-join taxon/{2}.sizes -e -f <(
+                    tsv-filter taxon/{2}.sizes --le "2:${lower_limit}"
+                ) \
+                > taxon/{2}.filtered.sizes
+            mv taxon/{2}.filtered.sizes taxon/{2}.sizes
+        fi
+    '
+
+cat taxon/*.sizes | cut -f 1 | wc -l
+# cat taxon/*.sizes | cut -f 2 | paste -sd+ | bc
+awk '{sum+=$2} END {print sum}' taxon/*.sizes
+```
+
+### Rsync to hpcc
+```bash
+rsync -avP ~/project/plasmid/ wangq@202.119.37.251:data/plasmid
+```
+
+## Plasmid:run
