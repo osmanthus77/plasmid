@@ -18,6 +18,11 @@ readme.md中常用的命令
     `--ff-str-ne 1:2`ff字段filed/str字符串比较/ne不相等not equal，字段间字符串不相等过滤，第一列、第二列值不同时该行保留   
     `-d`设置字段分隔符，默认制表符\t。`-d" "`设置分隔符为空格     
     `--regex`匹配正则表达式regular expression。   
+    
+- `tsv-join`将输入与`filter`文件中数据进行匹配
+选项：`-e`exclude排除匹配的数据     
+    `-f`--filter-file（必须）过滤条件     
+
 
 - <(...)进程替换，括号内命令的结果作为**临时文件**传递给前一命令
 
@@ -75,6 +80,10 @@ readme.md中常用的命令
     `-l`只列出匹配到的文件名（--files-with-matches），而不显示文件内具体匹配的行的内容    
     `"{1}"`第一字段
 
+- `grep`文本搜索匹配
+选项：`-v`--invert-match反向匹配，保留没匹配上的
+    `-x`--line-match全行匹配，整行完全匹配才满需要求
+
 - `tr`（translate）替换、删除、压缩字符
 选项：
 
@@ -88,4 +97,12 @@ readme.md中常用的命令
 选项：`-s`single输入行和并转换为单行，默认tab分隔符
     `-d+`指定分隔符为`+`
 
-- `ba`basic calculator精确计算
+- `bc`basic calculator精确计算
+
+- `bsub`向LSF任务调度系统提交任务
+LSF：loading sharing facility负载共享设施，高性能计算集群的任务调度系统，管理、分配计算资源
+MPI：message passing interface消息传递接口，一种并行计算框架
+选项：`-q`制定队列queue，指定为`mpi`
+    `-n`分配运行，多核心
+    `-J`job任务名称
+    `-w`wait
