@@ -402,17 +402,3 @@ echo $(find groups -mindepth 1 -maxdepth 1 -type d | wc -l)
     $(find groups -mindepth 1 -maxdepth 3 -type f -name "*.nwk.pdf" | wc -l)
 
 ```
-
-cat taxon/group_target.tsv | sed -e '1d' | grep "^249" |
-    parallel --colsep '\t' --no-run-if-empty --line-buffer -k -j 1 '
-        echo -e "==> Group: [{2}]\tTarget:[{4}]\n"
-        
-        egaz template GENOMES/{2}/{4} \
-            $(cat taxon/{2}.sizes | cut -f 1 | grep -v -x "{4}" | xargs -I \[\] echo "GENOMES/{2}/[]") \
-            --multi -o groups/{2}/ \
-            --order \
-            --parallel 24 -v
-
-        bash groups/{2}/1_pair.sh
-        bash groups/{2}/3_multi.sh
-    '
