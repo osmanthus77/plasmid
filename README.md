@@ -48,7 +48,7 @@ find job -maxdepth 1 -type f -name "[0-9]??" | sort |
             mash sketch -k 21 -s 1000 -i -p 6 - -o {}.msh
     '
 
-# 计算每个小文件与refseq的Mash距离
+# 计算每个小文件与refseq的 Mash距离
 find job -maxdepth 1 -type f -name "[0-9]??" | sort | 
     parallel -j 4 --line-buffer '
         echo >&2 "==> {}"
@@ -238,7 +238,7 @@ find subgroup -name "*.lst" | sort |
         fi
     '
 
-# 将前一步骤中非冗余的connected_components中内容添加到subgroup中
+# 将前一步骤非冗余中的connected_components中内容添加到subgroup中
 cat ../nonredundant/connected_components.tsv | 
     parallel -j 1 --colsep "\t" '
         file=$(rg -F -l  "{1}" subgroup)
@@ -273,7 +273,7 @@ cd ~/project/plasmid/grouping
 echo -e "#Serial\tGroup\tCount\tTarget" > ../taxon/group_target.tsv
 
 # 统计分组信息（编号、subgroup组名、序列数量、代表序列ID）
-# 并按照subgroup分组顺序从refseq提取序列并简化序列ID
+# 并按照subgroup分组顺序从refseq提取序列
 cat next.tsv | cut -d " " -f 2 | 
     parallel -j 4 -k --line-buffer '
         echo >&2 "==> {}"
@@ -330,7 +330,7 @@ cat taxon/group_target.tsv | sed -e '1d' |
     '
 ```
 
-### 检查序列长度异常值
+### 筛选序列长度异常值
 ```bash
 cd ~/project/plasmid
 
@@ -344,11 +344,11 @@ cat taxon/group_target.tsv | sed -e '1d' |
         echo -e "==> Group: [{2}]\t Target: [{4}]"
         
         median=$(cat taxon/{2}.sizes | datamash median 2)
-        mad=$(cat taxon/{2}.sizes | datamsh mad 2)
+        mad=$(cat taxon/{2}.sizes | datamash mad 2)
         lower_limit=$( bc <<< " (${median} - 2 * ${mad}) / 2" )
 
 #        echo $median $mad $lower_limit
-        lines=$(tsv-filter taxon/{2}.sizes --le "2:${lower_limit}" |wc -l)
+        lines=$(tsv-filter taxon/{2}.sizes --le "2:${lower_limit}" | wc -l)
         
         if (( lines >0 )); then
             echo >&2 "     $lines lines to be filtered"
@@ -371,3 +371,48 @@ rsync -avP ~/project/plasmid/ wangq@202.119.37.251:data/plasmid
 ```
 
 ## Plasmid:run
+```bash
+cd ~/project/plasmid
+
+
+cat taxon/group_target.tsv | sed -e '1d' | grep "^53" |
+    parallel --colsep '\t' --no-run-if-empty --line-buffer -k -j 1 '
+        echo -e "==> Group: [{2}]\tTarget:[{4}]\n"
+        
+        egaz template GENOMES/{2}/{4} \
+            $(cat taxon/{2}.sizes | cut -f 1 | grep -v -x "{4}" | xargs -I \[\] echo "GENOMES/{2}/[]") \
+            --multi -o groups/{2}/ \
+            --order \
+            --parallel 24 -v
+
+#           bash groups/{2}/1_pair.sh
+#           bash groups/{2}/3_multi.sh
+
+            bsub -q -mpi -n 24 -J "{2}-1_pair" "bash groups/{2}/1_pair.sh"
+            bsub -w "ended({2}-1_pair)" \
+                -q mpi -n 24 -J "{2}-3_multi" "bash groups/{2}/3_multi.sh"
+    '
+
+# clean
+find groups -mindepth 1 -maxdepth 3 -type d -name "*.raw" | parallel -r rm -rf
+find groups -mindepth 1 -maxdepth 3 -type d -name "*_fasta" | parallel -r rm -rf
+find . -mindepth 1 -maxdepth 3 -type f -name "output.*" | parallel -r rm
+
+echo $(find groups -mindepth 1 -maxdepth 1 -type d | wc -l) 
+    $(find groups -mindepth 1 -maxdepth 3 -type f -name "*.nwk.pdf" | wc -l)
+
+```
+
+cat taxon/group_target.tsv | sed -e '1d' | grep "^249" |
+    parallel --colsep '\t' --no-run-if-empty --line-buffer -k -j 1 '
+        echo -e "==> Group: [{2}]\tTarget:[{4}]\n"
+        
+        egaz template GENOMES/{2}/{4} \
+            $(cat taxon/{2}.sizes | cut -f 1 | grep -v -x "{4}" | xargs -I \[\] echo "GENOMES/{2}/[]") \
+            --multi -o groups/{2}/ \
+            --order \
+            --parallel 24 -v
+
+        bash groups/{2}/1_pair.sh
+        bash groups/{2}/3_multi.sh
+    '
